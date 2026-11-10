@@ -174,7 +174,8 @@ export XIANGQI_URL=http://<你的服务器>:5040                        # 环境
 | `easy` / `normal` / `hard` / `max` | Pikafish | depth1+MultiPV 放水 / depth3 / movetime 400ms / movetime 1500ms |
 | `random` / `greedy` / `depth2` | 内置 | 纯 Python，零依赖 |
 
-Pikafish 用 `--pikafish <路径>` 指定（`auto` 自动探测、`off` 禁用）。它是 UCI 常驻子进程，
+Pikafish 用 `--pikafish <路径>` 指定（`auto` 自动探测、`off` 禁用），安装与权重放置见
+「部署 › 安装 Pikafish」。它是 UCI 常驻子进程，
 首次启动要加载 NNUE 权重（约 3.5s）。引擎不可用、崩溃或给出非法着法时**自动回落内置 `depth2`**，对局不中断。
 
 人机局席位固定：**电脑执黑，挑战者执红先行**，每步限时 10 分钟（双人局 60 秒）。
@@ -209,6 +210,36 @@ systemctl enable --now xiangqi
 
 `WorkingDirectory=/opt/xiangqi`，运行时数据（都不入库）：`xiangqi_state.json`（当前对局）、
 `xiangqi_history.jsonl`（JSONL 追加日志）、`xiangqi_games/<gid>.json`（每局归档）。
+
+### 安装 Pikafish（可选，`easy` / `normal` / `hard` / `max` 档需要）
+
+不装引擎也能跑：`--pikafish off`，或引擎缺失/崩溃时自动回落内置 `depth2`，只是人机难度档降级。
+
+```bash
+# 1. 从官方 release 取 .7z（需要 7z：Debian/Ubuntu 上 apt install p7zip-full 或 7zip）
+cd /tmp
+curl -LO https://github.com/official-pikafish/Pikafish/releases/download/Pikafish-2026-09-06/Pikafish.2026-09-06.7z
+7z x Pikafish.2026-09-06.7z -o/tmp/pikafish-src
+
+# 2. 二进制名与权重名在代码里是写死的，必须原样放到同一目录
+mkdir -p /opt/xiangqi/pikafish
+cp /tmp/pikafish-src/Pikafish-Linux-x86-64-universal \
+   /tmp/pikafish-src/pikafish.nnue \
+   /opt/xiangqi/pikafish/
+chmod +x /opt/xiangqi/pikafish/Pikafish-Linux-x86-64-universal
+
+# 3. 自检：输出 readyok 说明二进制与 NNUE 权重都能加载
+printf 'uci\nisready\nquit\n' | /opt/xiangqi/pikafish/Pikafish-Linux-x86-64-universal | grep -x readyok
+```
+
+- 上面 URL 里的 `Pikafish-2026-09-06` 是当前验证过的版本，换版本时同步改 tag 和文件名（releases 页：
+  <https://github.com/official-pikafish/Pikafish/releases>）。
+- `deploy/xiangqi.service` 里写死的就是 `/opt/xiangqi/pikafish/Pikafish-Linux-x86-64-universal`，按上面的位置放好就不用改单元。
+- 自定义位置：`--pikafish <路径>`，或环境变量 `PIKAFISH`；`auto` 依次探测
+  `$PIKAFISH` → `/opt/xiangqi/pikafish/<名>` → `<server 目录>/pikafish/<名>` → `<server 目录>/<名>` → `~/Downloads/pikafish/<名>`。
+- 权重必须叫 `pikafish.nnue` 且与二进制同目录：代码用 `EvalFile` 显式加载，缺失会直接启动失败，而不是悄悄变弱。
+- 首次加载权重约 3.5s，之后是常驻子进程（默认 Hash 64MB、1 线程，可用 `--pikafish-hash` / `--pikafish-threads` 调）。
+- 同一份包是平铺的，还带 macOS / Android / Windows 的 universal 二进制，本地调试按平台取用；线上只需要上一步那两个文件。
 
 ## 几处值得记的坑
 
