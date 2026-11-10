@@ -1,0 +1,21 @@
+# 运行时数据（不入库）
+xiangqi_state.json
+xiangqi_state.json.tmp
+xiangqi_history.jsonl
+xiangqi_games/
+piru_state.json
+*.jsonl
+
+# 工具产物
+__pycache__/
+*.pyc
+session.json
+replay_preview.html
+preview_*.html
+*.png
+.pytest_cache/
+.arts/
+.codeartsdoer/
+
+# 客户端本机配置（含服务地址，模板见 config.example.json）
+client/xiangqi/config.json

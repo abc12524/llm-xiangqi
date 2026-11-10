@@ -1,0 +1,25 @@
+[Unit]
+Description=Xiangqi battle server (LLM friendly + local engine)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/xiangqi
+ExecStart=/usr/bin/python3 /opt/xiangqi/server/xiangqi_server.py \
+  --port 5040 \
+  --timeout 60 \
+  --warn-before 20 \
+  --engine hard \
+  --pikafish /opt/xiangqi/pikafish/Pikafish-Linux-x86-64-universal \
+  --engine-timeout 600 \
+  --engine-warn-before 60 \
+  --log /opt/xiangqi/xiangqi_history.jsonl \
+  --state-file /opt/xiangqi/xiangqi_state.json
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
