@@ -13,6 +13,7 @@ session.json
 replay_preview.html
 preview_*.html
 *.png
+!docs/*.png
 .pytest_cache/
 .arts/
 .codeartsdoer/
