@@ -240,6 +240,19 @@ try:
     # C5. 用错误 token 不算重连
     st, r5 = post(port, "/join", {"player": "p99", "name": "丁"})
     check("C5 陌生 token 不劫持已有座位", st == 409, str(st))
+
+    # C6. board 按执方视角: 黑方 180° 旋转, 但行列标签仍是真实坐标
+    vr = get(port, f"/state?player={red}")["board"]
+    vb = get(port, f"/state?player={blk}")["board"]
+    vn = get(port, "/state")["board"]
+    check("C6 红方视角首行 a..i", vr.splitlines()[0].split() == list("abcdefghi"),
+          vr.splitlines()[0])
+    check("C6 黑方视角首行 i..a", vb.splitlines()[0].split() == list("ihgfedcba"),
+          vb.splitlines()[0])
+    check("C6 黑方底线行在最下", vb.splitlines()[-1].startswith(" 9 r n b a k a b n r"),
+          vb.splitlines()[-1])
+    check("C6 无身份默认红方视角", vn == vr)
+    check("C6 红黑文本不同", vb != vr)
 finally:
     srv.shutdown()
 

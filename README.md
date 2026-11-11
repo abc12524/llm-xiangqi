@@ -63,13 +63,16 @@ deploy/xiangqi.service     systemd 单元示例
 
 - **大写是红方**（`K`帅 `A`仕 `B`相 `N`马 `R`车 `C`炮 `P`兵），**小写是黑方**（`k`将 `a`士 `b`象 `n`马 `r`车 `c`炮 `p`卒），`.` 空点
 - 走法 4 字符 `起点列行+终点列行`，如 `h2e2` = 炮二平五；`h2-e2`、大写、空格都会被归一化
+- 上面的示意是**红方视角**。`/state?player=<黑方 token>` 返回的 `board` 是**黑方视角**：
+  行列同时反转（180° 旋转，行 0 在上、i 列在左），但**行列标签仍是真实坐标**，所以走法不用换算；
+  红方 token 和不带 `player` 的请求保持红方视角
 
 ## 接口
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/join` | 入座/重连。`{"name"}`, 人机加 `{"vs":"engine","level":"hard"}`；返回 `player` / `side` / `board_legend` |
-| GET | `/state?player=p1` | 局面快照。**合法走法只给该走棋的一方** |
+| GET | `/state?player=p1` | 局面快照。**合法走法只给该走棋的一方**；`board` 按执方视角（黑方为 180° 旋转，标签仍是真实坐标） |
 | GET | `/wait?player=p1&since=<ply>&timeout=50` | 长轮询，事件：`your_turn` / `opponent_moved` / `draw_offer` / `timeout_warning` / `game_over` |
 | POST | `/move` | 走棋，`{"player","move","wait"?}`；非法走法返回 400 并附当前合法走法 |
 | POST | `/draw` | 求和：`{"player"}` 提议，对手 `{"player","accept":true|false}` 同意/反对 |

@@ -379,11 +379,14 @@ def gen_legal_moves(board, color):
         result.append(m)
     return result
 
-def render_board(board):
-    lines = ["   a b c d e f g h i"]
-    for y in range(9, -1, -1):
+def render_board(board, flip=False):
+    """flip=True 给黑方看: 行列都反转(180°), 但行列标签仍是真实坐标"""
+    rows = range(10) if flip else range(9, -1, -1)
+    cols = range(8, -1, -1) if flip else range(9)
+    lines = ["   " + " ".join("abcdefghi"[x] for x in cols)]
+    for y in rows:
         cells = []
-        for x in range(9):
+        for x in cols:
             p = board[y][x]
             if p is None:
                 cells.append(".")
@@ -414,12 +417,16 @@ RULES_MD = """# 中国象棋 · 对战服务
 棋盘 9 列 × 10 行，中间是楚河汉界。
 
 - 列：`a`–`i`，从左到右（红方视角）
-- 行：`0`–`9`，从下到上；**红方底线为 `0`（在屏幕下方），黑方底线为 `9`（在屏幕上方）**
-- 红方位于下方（行 0–4），黑方位于上方（行 5–9）
+- 行：`0`–`9`，从下到上；**红方底线为 `0`、黑方底线为 `9`**
+- 红方位于行 0–4，黑方位于行 5–9
 
 **棋子大小写**（看棋盘先认这一点）：**大写是红方**（`K`帅 `A`仕 `B`相 `N`马 `R`车 `C`炮 `P`兵），
 **小写是黑方**（`k`将 `a`士 `b`象 `n`马 `r`车 `c`炮 `p`卒），`.` 是空点。
-所以最下面一行 `0` 全是大写、最上面一行 `9` 全是小写 —— 行号 0 永远在下方，别记反。
+红方视角下最下面一行 `0` 全是大写、最上面一行 `9` 全是小写；
+**行号 `0` 永远是红方底线、`9` 永远是黑方底线**，别记反。
+
+**视角**：`board` 按请求方身份给朝向 —— 黑方 token 拿到的是 180° 旋转（行 `0` 在上、`i` 列在左），
+行列标签仍是真实坐标，走法不需要换算；无身份或红方请求保持红方视角（行 `0` 在下、`a` 列在左）。
 
 走法写成 4 个字符：`起点列行 + 终点列行`，例如 `h2e2` 表示 h2 的棋子走到 e2。
 大小写、空格、`h2-e2`、`h2>e2` 都会被自动归一化。
@@ -1970,7 +1977,7 @@ class Game:
             snap = {
                 "status": self.status,
                 "turn": self.turn,
-                "board": render_board(self.board),
+                "board": render_board(self.board, flip=(your_side == 'black')),
                 "in_check": in_check(self.board, turn_color),
             }
             # 走法归属: 观战(不知道你是谁)给该走的一方并标 moves_for;
