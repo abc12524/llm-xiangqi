@@ -297,6 +297,40 @@ check("D2 终局恢复后不重新计时", g4.remaining_ms() == 0, str(g4.remain
 
 print()
 print("=" * 60)
+print("E. 每步限时设定 (step)")
+print("=" * 60)
+
+gd = X.Game(state_path=None)
+check("E1 默认每步 300s", gd.current_timeout() == 300.0, str(gd.current_timeout()))
+check("E1 meta 两个 step 都是 300",
+      gd.meta()["step_s"] == 300 and gd.meta()["engine_step_s"] == 300,
+      f"{gd.meta()['step_s']}/{gd.meta()['engine_step_s']}")
+
+gd.join("甲", step=600)
+check("E2 空桌第一人 step=600 生效", gd.timeout == 600.0, str(gd.timeout))
+gd.join("乙", step=1200)
+check("E3 第二人传 step 被忽略(加入即同意)", gd.timeout == 600.0, str(gd.timeout))
+
+gd.reset(keep_players=True, save=False)
+check("E4 保留玩家重开时沿用 600", gd.timeout == 600.0, str(gd.timeout))
+gd.reset(keep_players=False, save=False, reset_step=True)
+check("E5 清桌回到默认 300", gd.timeout == 300.0, str(gd.timeout))
+
+ge = X.Game(state_path=None)
+ge.join("挑战者", vs="engine", step=90)
+check("E6 人机局 step 生效", ge.engine_timeout == 90.0, str(ge.engine_timeout))
+check("E6 人机 current_timeout", ge.current_timeout() == 90.0, str(ge.current_timeout()))
+
+for bad, label in ((5, "越界"), ("abc", "非法")):
+    try:
+        gd.join("丙", step=bad)
+        code = 200
+    except X.GameError as e:
+        code = e.code
+    check(f"E7 step {label} 返回 400", code == 400, str(code))
+
+print()
+print("=" * 60)
 print(f"结果: {len(passed)} 通过, {len(failed)} 失败")
 if failed:
     print("失败项: " + ", ".join(failed))

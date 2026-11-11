@@ -4,9 +4,9 @@
 中国象棋对战服务端（LLM 友好接口）
 
 规则: 红先行; 双人局红黑随机分配, 人机局电脑固定执黑(挑战者执红先行);
-      只有执棋方可走子; 每步限时(双人默认 60s / 人机 600s)超时判负
+      只有执棋方可走子; 每步限时(默认 300s, join 的 step 可改, 0=不限)超时判负
 接口:
-  POST /join   {"name"?,"player"?}        → {"player","side","resumed",...}  带 player/同名 = 重连恢复
+  POST /join   {"name"?,"player"?,"step"?} → {"player","side","resumed","step_s",...}  带 player/同名 = 重连恢复
   GET  /wait?player=p1&since=<ply>&timeout=50 → {"event",...}  长轮询: 轮到你/对手走了/快超时/终局
   POST /move   {"player","move":"h2e2"}   → 状态快照                     仅执棋方可用
   GET  /state?player=p1                   → 状态快照
@@ -49,6 +49,11 @@ PERPETUAL_REPEAT = 3                   # 同一局面出现第 3 次即判长将
 # 机器一方可选强度: 本地纯 Python 引擎(random/greedy/depth2) + Pikafish 档位(easy..max)
 ALL_LEVELS = tuple(xiangqi_engine.LEVELS) + tuple(pikafish_uci.LEVELS)
 DEFAULT_LEVEL = 'hard'
+
+# 每步限时(秒): 默认 5 分钟, join 时可用 step 覆盖(0 = 不限)
+DEFAULT_STEP = 300.0
+DEFAULT_ENGINE_STEP = 300.0
+STEP_MIN, STEP_MAX = 30, 3600
 
 EV_YOUR_TURN = 'your_turn'          # 轮到你了
 EV_OPPONENT_MOVED = 'opponent_moved'  # 对手落子
@@ -497,12 +502,14 @@ RULES_MD = """# 中国象棋 · 对战服务
 
 ```
 POST /join
-{"name": "昵称", "player": "p1"}
+{"name": "昵称", "player": "p1", "step": 600}
 ```
 
 - 新玩家：不传 `player`，也不与已有玩家同名 → 分配新编号；满 2 人后新玩家再加入返回 409
 - **重连**：传回原来的 `player`（如 `"p1"`），或传与之前**相同的 `name`**，即恢复原来的角色和棋盘，`resumed` 为 `true`
-- 返回 `{"player": "p1", "side": "red"|"black", "resumed": bool, ...状态快照}`
+- 返回 `{"player": "p1", "side": "red"|"black", "resumed": bool, "step_s": 300, ...状态快照}`
+- **每步限时** `step`（秒）：默认 300（5 分钟），可写 30–3600，`0` = 不限；
+  **只有空桌第一人（人机局是挑战者）能设定，后来者加入即同意**，再传 `step` 会被忽略，返回值里的 `step_s` 是实际生效值
 - 双人对战：第 1 人随机拿红或黑，第 2 人自动拿另一方（**两人到齐才开局**，计时从红方第一步开始）
 - 人机对战：见下节，席位固定
 
@@ -510,7 +517,7 @@ POST /join
 
 ```
 POST /join
-{"name": "我", "vs": "engine", "level": "hard"}
+{"name": "我", "vs": "engine", "level": "hard", "step": 600}
 ```
 
 带上 `"vs": "engine"`，机器会**自动坐到你的对面并立即开局**，不需要第二个人。
@@ -1132,7 +1139,7 @@ function paintMeta(s) {
   }
   const total = H.reduce((a, r) => a + (r.elapsed_ms || 0), 0);
   const last = H.length ? H[H.length - 1].at.slice(11, 19) : '—';
-  const limit = M.auto_side ? M.engine_step_s : M.step_s;   // 人机局用 10 分钟那一档
+  const limit = M.auto_side ? M.engine_step_s : M.step_s;   // 人机局取 engine_step_s
   statsBox.innerHTML =
     '<div><b>' + H.length + '</b><span>手数</span></div>' +
     '<div><b>' + (total >= 1000 ? fmtMs(total) : '—') + '</b><span>总用时</span></div>' +
@@ -1304,6 +1311,18 @@ class GameOver(GameError):
 # ============================================================
 # 对局状态
 # ============================================================
+def parse_step(v):
+    """解析 join 的 step(秒): None = 未指定, 0 = 不限, 否则限 30-3600"""
+    if v is None or v == '':
+        return None
+    try:
+        s = float(v)
+    except (TypeError, ValueError):
+        raise GameError("bad step: expect seconds, e.g. 300")
+    if s != 0 and not (STEP_MIN <= s <= STEP_MAX):
+        raise GameError(f"step out of range: {STEP_MIN}-{STEP_MAX} seconds, or 0 = no limit")
+    return s
+
 def _board_to_json(board):
     return [[None if c is None else [c[0], c[1]] for c in row] for row in board]
 
@@ -1311,9 +1330,9 @@ def _board_from_json(data):
     return [[None if c is None else (c[0], c[1]) for c in row] for row in data]
 
 class Game:
-    def __init__(self, auto_side=None, timeout=60.0, log_path=None,
+    def __init__(self, auto_side=None, timeout=DEFAULT_STEP, log_path=None,
                  state_path=None, warn_before=20.0, engine_level=DEFAULT_LEVEL,
-                 engine_timeout=600.0, engine_warn_before=60.0, games_dir=None):
+                 engine_timeout=DEFAULT_ENGINE_STEP, engine_warn_before=60.0, games_dir=None):
         # 人机局固定席位: 电脑永远执黑, 挑战者执红先行
         self.auto_side = ENGINE_SIDE if auto_side else None
         self.games_dir = games_dir or None    # 每局一个 <gid>.json, 供列表与复现
@@ -1321,8 +1340,8 @@ class Game:
         self.resigned = None
         self.engine_level = (engine_level if engine_level in ALL_LEVELS
                              else DEFAULT_LEVEL)
-        self.timeout = float(timeout)                 # 双人对战: 每步限时
-        self.engine_timeout = float(engine_timeout)   # 人机模式: 每步限时(默认 10 分钟)
+        self.timeout = float(timeout)                 # 双人对战: 每步限时(默认 5 分钟)
+        self.engine_timeout = float(engine_timeout)   # 人机模式: 每步限时(默认 5 分钟)
         self.engine_warn_ms = int(max(0.0, engine_warn_before) * 1000)
         self.log_path = log_path
         self.state_path = state_path
@@ -1541,7 +1560,7 @@ class Game:
         self._warned = set()          # 新回合, 预警重新计数
 
     def current_timeout(self):
-        """当前对局的每步限时: 人机 10 分钟, 双人 60 秒"""
+        """当前对局的每步限时: 按模式取, 默认 5 分钟, join 的 step 可改"""
         return self.engine_timeout if self.auto_side else self.timeout
 
     def current_warn_ms(self):
@@ -1550,11 +1569,13 @@ class Game:
             return self.engine_warn_ms
         return self.warn_ms
 
-    def join(self, name=None, token=None, vs=None, level=None):
+    def join(self, name=None, token=None, vs=None, level=None, step=None):
         """返回 (token, side, resumed)。带有效 token 或同名 = 重连恢复。
         vs='engine' 时落座并让机器执黑开局(人机模式: 挑战者执红先行)。
+        step: 每步限时(秒)。只有空桌第一人/挑战者能设定; 后来者加入即同意, 传了也忽略。
         """
         nm = str(name)[:24] if name else None
+        want_step = parse_step(step)
 
         # 换难度走哪条路径都要生效(重连/同名恢复都会提前 return)
         if vs == 'engine' and level in ALL_LEVELS:
@@ -1577,13 +1598,15 @@ class Game:
             # 人机固定席位: 电脑执黑, 挑战者执红先行
             if self._seated() & {HUMAN_SIDE, ENGINE_SIDE}:
                 if self.status in ('red_win', 'black_win'):
-                    self.reset(keep_players=False, save=False)   # 上一局已结束, 自动清桌
+                    self.reset(keep_players=False, save=False, reset_step=True)   # 上一局已结束, 自动清桌
                 else:
                     raise TableFull(
                         "engine game needs an empty table: challenger=red, engine=black; "
                         "POST /reset {\"clear\": true} first")
             self.auto_side = ENGINE_SIDE
             side = HUMAN_SIDE
+            if want_step is not None:
+                self.engine_timeout = want_step      # 挑战者开的局由他定每步限时
         else:
             if self._seated() >= {'red', 'black'}:
                 raise TableFull("table full (2 players already seated)")
@@ -1596,8 +1619,10 @@ class Game:
                 side = HUMAN_SIDE
             elif not seated:
                 side = random.choice(['red', 'black'])  # 第一人随机分边
+                if want_step is not None:
+                    self.timeout = want_step            # 空桌第一人定每步限时
             else:
-                side = 'black' if 'red' in seated else 'red'
+                side = 'black' if 'red' in seated else 'red'   # 后来者加入即同意现有设置
         self._pid += 1
         token = f"p{self._pid}"
         self.players[token] = side
@@ -1620,7 +1645,7 @@ class Game:
                 self.players[tok] = side
 
     # ---------- 局面 ----------
-    def reset(self, keep_players=True, save=True):
+    def reset(self, keep_players=True, save=True, reset_step=False):
         self._archive()                            # 上一局先落盘再清空
         self.gid = self._new_gid()
         self.started_at = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
@@ -1637,6 +1662,9 @@ class Game:
         self._warned = set()
         if not keep_players:
             self._acks = {}
+            if reset_step:                         # 只有显式清桌才回默认限时(构造时不重置)
+                self.timeout = DEFAULT_STEP
+                self.engine_timeout = DEFAULT_ENGINE_STEP
         self._turn_started = time.monotonic()
         self.status = 'waiting'
         if not keep_players:
@@ -2254,11 +2282,13 @@ class Handler(BaseHTTPRequestHandler):
             g = self.game
             if path == '/join':
                 token, side, resumed = g.join(data.get('name'), data.get('player'),
-                                              data.get('vs'), data.get('level'))
+                                              data.get('vs'), data.get('level'),
+                                              data.get('step'))
                 g.auto_play()
                 g.cond.notify_all()
                 self._send(200, {"player": token, "side": side,
                                  "resumed": resumed,
+                                 "step_s": int(g.current_timeout()),
                                  "board_legend": BOARD_LEGEND,
                                  **g.snapshot(you=token)})
                 return
@@ -2279,7 +2309,8 @@ class Handler(BaseHTTPRequestHandler):
                 who = self._player(data)
                 if who and who not in g.players:
                     raise NotJoined("not joined; POST /join first")
-                g.reset(keep_players=not bool(data.get('clear')))
+                g.reset(keep_players=not bool(data.get('clear')),
+                        reset_step=bool(data.get('clear')))
                 g.auto_play()
                 g.cond.notify_all()
                 self._send(200, g.snapshot(you=who))
@@ -2322,12 +2353,12 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--port', type=int, default=8000)
-    ap.add_argument('--timeout', type=float, default=60.0,
-                    help='每步限时(秒), 超时判负; 0 = 不限时')
+    ap.add_argument('--timeout', type=float, default=DEFAULT_STEP,
+                    help='每步限时(秒), 超时判负; 默认 300 (5 分钟), 0 = 不限时; join 的 step 可覆盖')
     ap.add_argument('--warn-before', type=float, default=20.0,
                     help='双人对战剩余多少秒时推送 timeout_warning (0 = 不提醒)')
-    ap.add_argument('--engine-timeout', type=float, default=600.0,
-                    help='人机模式每步限时(秒), 默认 600 (10 分钟)')
+    ap.add_argument('--engine-timeout', type=float, default=DEFAULT_ENGINE_STEP,
+                    help='人机模式每步限时(秒), 默认 300 (5 分钟); join 的 step 可覆盖')
     ap.add_argument('--engine-warn-before', type=float, default=60.0,
                     help='人机模式剩余多少秒时推送预警, 默认 60')
     ap.add_argument('--auto-opponent', choices=['black', 'none'],

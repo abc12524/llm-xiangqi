@@ -4,17 +4,19 @@
 # usage:
 #   action = state（默认）| join | move | wait | history | games | resign | draw | reset
 #     join: name / vs="engine"（人机: 你固定执红先行, 电脑执黑）/ level=hard|max|normal|easy
-#           （Pikafish 四档）或 random|greedy|depth2；上一局已结束会自动清桌开新局
+#           （Pikafish 四档）或 random|greedy|depth2 / step=每步限时秒数（默认 300, 30-3600,
+#           0=不限；空桌第一人设定, 后来者加入即同意）；上一局已结束会自动清桌开新局
 #     move: move="h2e2"；wait=秒（默认 55，走完直接挂起等对手，一次调用拿到下一手；0=不等）
 #     history: last=N（末尾 N 手）；game=<gid> 看历史某局；games: limit=N（默认 20）
 #     resign: 认输；draw: accept=true 同意对方求和 / false 反对（不带 accept = 自己提议）
 #     reset: clear=true
 #   配置: config.json 的 XIANGQI_URL（默认 http://192.168.30.181:5040）
-#   示例: {"action":"move","move":"h2e2"} / {"action":"join","vs":"engine","level":"hard"}
+#   示例: {"action":"move","move":"h2e2"} / {"action":"join","vs":"engine","level":"hard","step":600}
 """中国象棋服务端（xiangqi_server.py）的客户端技能。
 
-服务端: POST /join /move /reset, GET /state /wait /history（默认 60s 一步, 人机 600s）
-棋盘: 列 a-i 左→右, 行 0-9 下→上(红方视角); 走法 'h2e2' = h2 走到 e2
+服务端: POST /join /move /reset, GET /state /wait /history（每步默认 300s, join 的 step 可改）
+棋盘: 列 a-i, 行 0-9; 红方视角行 0 在下; 黑方 token 拿到的 board 是 180° 旋转
+      (i 列在左、行 0 在上), 两种视角的标签都是真实坐标, 走法 'h2e2' = h2 走到 e2 不用换算
 子: 大写=红 K帅 A仕 B相 N马 R车 C炮 P兵; 小写=黑 k将 a士 b象 n马 r车 c炮 p卒
 
 输出只保留决策需要的东西（省 token）:
@@ -218,10 +220,13 @@ def _act_join(a, sess):
         payload["vs"] = a["vs"]
     if a.get("level"):
         payload["level"] = a["level"]
+    if a.get("step") is not None:
+        payload["step"] = a["step"]        # 每步限时(秒), 0 = 不限; 后来者传了也会被忽略
     r = _call("/join", payload)
     _save_session({"player": r.get("player"), "side": r.get("side"),
                    "name": payload.get("name", "")})
-    out = {"side": r.get("side"), "resumed": bool(r.get("resumed"))}
+    out = {"side": r.get("side"), "resumed": bool(r.get("resumed")),
+           "step": r.get("step_s")}
     out.update(_brief(r, my_side=r.get("side")))
     return out
 

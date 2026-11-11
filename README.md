@@ -71,7 +71,7 @@ deploy/xiangqi.service     systemd 单元示例
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/join` | 入座/重连。`{"name"}`, 人机加 `{"vs":"engine","level":"hard"}`；返回 `player` / `side` / `board_legend` |
+| POST | `/join` | 入座/重连。`{"name"}`，人机加 `{"vs":"engine","level":"hard"}`，`step` 设每步限时（默认 300 秒，空桌第一人生效）；返回 `player` / `side` / `step_s` / `board_legend` |
 | GET | `/state?player=p1` | 局面快照。**合法走法只给该走棋的一方**；`board` 按执方视角（黑方为 180° 旋转，标签仍是真实坐标） |
 | GET | `/wait?player=p1&since=<ply>&timeout=50` | 长轮询，事件：`your_turn` / `opponent_moved` / `draw_offer` / `timeout_warning` / `game_over` |
 | POST | `/move` | 走棋，`{"player","move","wait"?}`；非法走法返回 400 并附当前合法走法 |
@@ -151,7 +151,7 @@ export XIANGQI_URL=http://<你的服务器>:5040                        # 环境
 | action | 参数 | 说明 |
 |---|---|---|
 | `state` | — | 当前局面（默认动作） |
-| `join` | `name`、`vs`、`level` | 入座/重连；`vs="engine"` 开人机局，`level` 取 `easy` / `normal` / `hard` / `max` 或 `random` / `greedy` / `depth2` |
+| `join` | `name`、`vs`、`level`、`step` | 入座/重连；`vs="engine"` 开人机局，`level` 取 `easy` / `normal` / `hard` / `max` 或 `random` / `greedy` / `depth2`；`step` 设每步限时（秒，默认 300，先进桌的人定，后来者加入即同意） |
 | `move` | `move`（如 `h2e2`）、`wait` | 走子；`wait` 默认 55 秒、上限 110，`0` = 不等对手 |
 | `wait` | `wait` | 只挂起等对手 |
 | `history` | `last=N`、`game=<gid>` | 棋谱，`last` 只取末尾 N 手 |
@@ -181,7 +181,8 @@ Pikafish 用 `--pikafish <路径>` 指定（`auto` 自动探测、`off` 禁用�
 「部署 › 安装 Pikafish」。它是 UCI 常驻子进程，
 首次启动要加载 NNUE 权重（约 3.5s）。引擎不可用、崩溃或给出非法着法时**自动回落内置 `depth2`**，对局不中断。
 
-人机局席位固定：**电脑执黑，挑战者执红先行**，每步限时 10 分钟（双人局 60 秒）。
+人机局席位固定：**电脑执黑，挑战者执红先行**。每步限时默认 **5 分钟**（人机与双人相同），
+`join` 时用 `step`（秒，30–3600，`0`=不限）指定；**空桌第一人设定，后来者加入即同意**，返回值 `step_s` 是实际生效值。
 
 ## 测试
 
